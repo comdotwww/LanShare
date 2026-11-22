@@ -449,7 +449,7 @@ h2{{font-size:15px;margin:0 0 12px}}
 <style>
   :root {{ color-scheme: light; }}
   * {{ box-sizing: border-box; }}
-  body {{ margin: 0; padding: 32px 16px; background: #f5f7fb; color: #111827; font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; }}
+  body {{ margin: 0; padding: 32px 16px; background: #f5f7fb; color: #111827; font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; }}
   .wrap {{ max-width: 980px; margin: 0 auto; }}
   .panel {{ background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); overflow: hidden; }}
   .head {{ padding: 24px 28px; border-bottom: 1px solid #eef0f4; }}

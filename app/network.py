@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import socket
 import subprocess
@@ -23,10 +24,15 @@ def _default_lan_ip() -> str | None:
     """通过 UDP connect 获取出网网卡地址，不会真正发送数据包。"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.connect(("223.5.5.5", 80))
-        ip = sock.getsockname()[0]
-        return ip if _valid_ipv4(ip) and not ip.startswith("127.") else None
-    except OSError:
+        # TEST-NET 保留地址：只用于让系统选择出网网卡，不会真正发送数据包。
+        for target in ("192.0.2.1", "198.51.100.1", "203.0.113.1"):
+            try:
+                sock.connect((target, 9))
+                ip = sock.getsockname()[0]
+                if _valid_ipv4(ip) and not ip.startswith("127."):
+                    return ip
+            except OSError:
+                continue
         return None
     finally:
         sock.close()
@@ -69,6 +75,78 @@ def _ipconfig_entries() -> List[Tuple[str, str]]:
     return entries
 
 
+def _linux_entries() -> List[Tuple[str, str]]:
+    """在 Linux 上从 `ip -j addr` 提取网卡名与 IPv4。"""
+    if sys.platform.startswith("linux") is False:
+        return []
+    try:
+        output = subprocess.run(
+            ["ip", "-j", "addr"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=5,
+        ).stdout
+        data = json.loads(output)
+        entries: List[Tuple[str, str]] = []
+        for interface in data:
+            name = str(interface.get("ifname") or "网卡")
+            for info in interface.get("addr_info") or []:
+                if info.get("family") != "inet":
+                    continue
+                ip = str(info.get("local") or "")
+                if _valid_ipv4(ip) and not ip.startswith(("127.", "169.254.")):
+                    entries.append((name, ip))
+        return entries
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return []
+
+
+def _mac_entries() -> List[Tuple[str, str]]:
+    """在 macOS 上从 route/ifconfig 提取默认网卡与 IPv4。"""
+    if sys.platform != "darwin":
+        return []
+    interface = ""
+    try:
+        route_output = subprocess.run(
+            ["route", "-n", "get", "default"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=5,
+        ).stdout
+        match = re.search(r"^\s*interface:\s*(\S+)", route_output, re.MULTILINE)
+        if match:
+            interface = match.group(1)
+    except (OSError, subprocess.SubprocessError):
+        interface = ""
+
+    commands = [[ "ifconfig", interface ]] if interface else [["ifconfig", "-a"]]
+    entries: List[Tuple[str, str]] = []
+    for command in commands:
+        try:
+            output = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=5,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in output.splitlines():
+            match = re.search(r"\binet\s+(?:\d{1,3}\.){3}\d{1,3}", line)
+            if not match:
+                continue
+            ip = match.group(0).rsplit(" ", 1)[-1]
+            if _valid_ipv4(ip) and not ip.startswith(("127.", "169.254.")):
+                entries.append((interface or "本机 IPv4", ip))
+    return entries
+
+
 def _socket_entries() -> List[Tuple[str, str]]:
     entries: List[Tuple[str, str]] = []
     try:
@@ -93,7 +171,14 @@ def list_bind_addresses() -> List[Tuple[str, str]]:
         result.append((f"主网卡 · {default_ip}", default_ip))
         seen.add(default_ip)
 
-    for label, ip in _ipconfig_entries() + _socket_entries():
+    if sys.platform == "win32":
+        platform_entries = _ipconfig_entries()
+    elif sys.platform == "darwin":
+        platform_entries = _mac_entries()
+    else:
+        platform_entries = _linux_entries()
+
+    for label, ip in platform_entries + _socket_entries():
         if ip in seen:
             continue
         seen.add(ip)

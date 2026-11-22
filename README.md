@@ -2,7 +2,13 @@
 
 ## 1. 项目定位
 
-LAN File Share 是一个面向 Windows 局域网环境的桌面文件分享工具。它把本机文件或文件夹转换为可在同一局域网内访问的 HTTP 链接，并支持对外提供受控的上传文件夹。程序使用 PySide6 构建桌面界面，使用 Python 标准库 `http.server` 提供 HTTP 服务，最终可通过 PyInstaller 打包为单文件 exe。
+LAN File Share 是一个面向局域网环境的跨平台桌面文件分享工具。它把本机文件或文件夹转换为可在同一局域网内访问的 HTTP 链接，并支持对外提供受控的上传文件夹。程序使用 PySide6 构建桌面界面，使用 Python 标准库 `http.server` 提供 HTTP 服务，最终可通过 PyInstaller 打包为单文件可执行程序。
+
+当前阶段：
+
+- Windows：源码运行、功能测试、单文件 exe 打包均已完成。
+- macOS / Linux：源码运行与同一套功能测试已完成适配；可构建未签名单文件可执行程序。
+- 第二阶段：macOS `.app`/签名/公证、Linux AppImage/deb 等发行包。
 
 本文档位于项目根目录，适用于人工阅读和自动化 AI 执行。
 
@@ -53,8 +59,10 @@ LanShare/
 ├── README.md                # 本文档
 ├── main.py                  # 程序入口、单实例检查
 ├── requirements.txt         # Python 依赖
-├── run.bat                  # 开发运行脚本
+├── run.bat                  # Windows 开发运行脚本
+├── run.sh                   # macOS / Linux 开发运行脚本
 ├── build.bat                # Windows 构建脚本
+├── build.sh                 # macOS / Linux 构建脚本
 ├── LanFileShare.spec        # PyInstaller 裁剪打包配置
 ├── .gitignore               # 忽略虚拟环境、缓存与构建产物
 ├── app/
@@ -100,8 +108,10 @@ qrcode[pil]>=7.4
 pyinstaller>=6.0
 ```
 
-- 操作系统：Windows（项目当前在 Windows 11 上开发验证）。
+- 操作系统：Windows 10/11、macOS、Linux 均可从源码运行；Windows 11 为当前主要验证环境。
 - Python：建议 3.10+，当前验证环境为 3.13。
+- macOS：需要 Python 3、Xcode Command Line Tools（打包时）和系统字体 PingFang SC。
+- Linux：需要 Python 3 与 Qt xcb/Wayland 运行库；若缺少 Qt 平台插件依赖，需按发行版安装 `libxcb-*`、`libxkbcommon-x11-0` 等系统包。
 - 首次运行需要网络以下载依赖；之后可离线运行。
 - 打包产物 `dist/LanFileShare.exe` 不需要用户安装 Python。
 
@@ -127,7 +137,15 @@ python -m venv .venv
 
 `run.bat` 会在 `.venv` 不存在时自动创建虚拟环境并安装依赖。
 
-### 6.2 构建 exe
+macOS / Linux：
+
+```bash
+./run.sh
+```
+
+`run.sh` 会自动创建虚拟环境、安装依赖并启动程序。
+
+### 6.2 构建可执行文件
 
 在资源管理器中双击：
 
@@ -145,14 +163,33 @@ build.bat
 构建输出：
 
 ```text
-dist/LanFileShare.exe
+Windows:   dist/LanFileShare.exe
+macOS:     dist/LanFileShare
+Linux:     dist/LanFileShare
 ```
 
+macOS / Linux 可执行：
+
+```bash
+./build.sh
+```
+
+`LanFileShare.spec` 会按 `sys.platform` 选择裁剪规则：Windows 继续裁剪专属 DLL，macOS/Linux 使用对应动态库后缀与通用插件目录规则。第二阶段再提供 macOS `.app`/签名/公证和 Linux 发行包。
+
 ### 6.3 运行测试
+
+Windows：
 
 ```bash
 .venv/Scripts/python -m compileall -q app main.py tests
 .venv/Scripts/python tests/smoke_test.py
+```
+
+macOS / Linux：
+
+```bash
+.venv/bin/python -m compileall -q app main.py tests
+.venv/bin/python tests/smoke_test.py
 ```
 
 成功输出：
@@ -167,8 +204,8 @@ SMOKE_TEST_OK
 
 1. 启动程序。
 2. 在“服务设置”中确认监听 IP、端口和请求路径。
-3. 首次点击“启动服务”时阅读防火墙提示，勾选确认项后继续。
-4. 在随后出现的 Windows 防火墙弹窗中勾选“允许专用网络访问”，不要允许公用网络。
+3. 首次点击“启动服务”时阅读网络访问提示，勾选确认项后继续。
+4. Windows 防火墙弹窗中勾选“允许专用网络访问”；macOS 允许“本地网络”权限；Linux 如出现防火墙提示请允许入站连接。不要允许公用网络。
 5. 在“分享管理”添加文件或文件夹，复制链接或生成二维码。
 6. 在“上传管理”添加上传文件夹，复制上传链接或生成二维码。
 7. 局域网设备访问分享/上传链接即可下载或上传文件。
@@ -203,8 +240,13 @@ SMOKE_TEST_OK
 配置文件位置：
 
 ```text
-%APPDATA%/LanFileShare/config.json
+Windows:  %APPDATA%/LanFileShare/config.json
+macOS:    ~/Library/Application Support/LanFileShare/config.json
+Linux:    $XDG_CONFIG_HOME/LanFileShare/config.json
+          未设置 XDG_CONFIG_HOME 时为 ~/.config/LanFileShare/config.json
 ```
+
+测试或便携模式可通过环境变量 `LANFS_CONFIG_DIR` 覆盖配置根目录。
 
 | 键 | 默认值 | 说明 |
 |---|---|---|
@@ -240,12 +282,12 @@ SMOKE_TEST_OK
 | 启动、单实例 | `main.py` |
 | 打包裁剪 | `LanFileShare.spec` |
 | 回归测试 | `tests/smoke_test.py` |
-| 构建/运行脚本 | `build.bat`、`run.bat` |
+| 构建/运行脚本 | `build.bat`、`run.bat`、`build.sh`、`run.sh` |
 
 ## B. 前置条件
 
 1. 工作目录为项目根目录，即 README 所在目录。
-2. Windows 环境；使用 bash 或 PowerShell 均可。
+2. Windows、macOS 或 Linux 环境；使用 bash 或 PowerShell 均可。
 3. 已有 `.venv`；若不存在，先创建并安装依赖：
 
 ```bash
@@ -303,9 +345,9 @@ ls -lh dist/LanFileShare.exe
 ### 输出
 
 - 源码修改：项目内 `.py` / `.bat` / `.spec` / `.md` 文件。
-- 配置输出：`%APPDATA%/LanFileShare/config.json`。
-- 构建输出：`dist/LanFileShare.exe`。
-- 验证输出：`SMOKE_TEST_OK`、编译无错误、exe 可启动。
+- 配置输出：按平台写入用户配置目录，或 `LANFS_CONFIG_DIR` 指定目录。
+- 构建输出：`dist/LanFileShare.exe`（Windows）或 `dist/LanFileShare`（macOS/Linux）。
+- 验证输出：`SMOKE_TEST_OK`、编译无错误、可执行文件可启动。
 
 ### 禁止输出
 
@@ -318,6 +360,10 @@ ls -lh dist/LanFileShare.exe
 |---|---|
 | `SMOKE_TEST_OK` 未出现 | 阅读完整 traceback，定位失败断言；不要跳过测试 |
 | `ModuleNotFoundError` | 检查 `.venv` 是否安装 `requirements.txt` |
+| 网卡列表缺少地址 | 检查平台分支：Linux 用 `ip -j addr`，macOS 用 `route`/`ifconfig`，Windows 用 `ipconfig` |
+| Qt 平台插件加载失败 | Linux 安装对应 xcb/Wayland 系统库；macOS 检查 Qt Cocoa 插件 |
+| 中文显示为方块 | 检查 `font_stack()` 回退链，或安装 PingFang SC / Noto Sans CJK SC |
+| macOS 局域网访问失败 | 检查系统设置中的“本地网络”权限 |
 | PyInstaller 打包后缺少模块 | 在 `LanFileShare.spec` 的 `hiddenimports` 或 `excludes` 中调整 |
 | 服务启动耗时数秒 | 检查 `LanHTTPServer.server_bind()` 是否误调用了 `socket.getfqdn()` |
 | 上传返回 404 | 检查 token 是否在 `UploadRegistry` 中注册、请求路径前缀是否正确 |
@@ -350,5 +396,5 @@ ls -lh dist/LanFileShare.exe
 - `tests/smoke_test.py` 输出 `SMOKE_TEST_OK`。
 - 涉及用户可见文案时，中英文均已覆盖。
 - 涉及 HTTP 路由时，分享与上传的安全校验均通过。
-- 需要 exe 时，`dist/LanFileShare.exe` 已重新生成并可启动。
+- 需要可执行文件时，`dist/LanFileShare.exe` 或 `dist/LanFileShare` 已重新生成并可启动。
 - 最终回复列出修改文件、验证命令、结果和任何未解决风险。

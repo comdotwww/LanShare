@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Iterable, List
+from typing import Dict, Iterable, List
 from urllib.parse import quote
 
 import qrcode
@@ -60,7 +60,7 @@ from .registry import Share, ShareRegistry, UploadFolder, UploadRegistry
 from .server import LanHTTPServer, ShareRequestHandler
 
 STYLE_TEMPLATE = """
-* { font-family: "__FONT_FAMILY__", sans-serif; }
+* { font-family: __FONT_STACK__; }
 QWidget { color: #111827; font-size: __FS_BASE__px; }
 QDialog, QMessageBox { background: #ffffff; color: #111827; }
 QMainWindow, QWidget#central { background: #f5f7fb; }
@@ -139,17 +139,16 @@ QPushButton#rowPrimary { padding: 5px 9px; font-size: __FS_TINY__px; border-radi
 QPushButton#rowDanger { padding: 5px 9px; font-size: __FS_TINY__px; border-radius: 7px; color: #b91c1c; border-color: #fee2e2; }
 
 QFrame#logCard { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px; }
-QPlainTextEdit#logView { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px; color: #4b5563; font-family: Consolas, "__FONT_FAMILY__", monospace; font-size: __FS_TINY__px; padding: 6px; }
+QPlainTextEdit#logView { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 8px; color: #4b5563; font-family: Consolas, __FONT_STACK__; font-size: __FS_TINY__px; padding: 6px; }
 QLineEdit#qrLink { color: #2563eb; font-size: __FS_SMALL__px; }
 """
 
 
 def build_stylesheet(font_family: str, font_size: int) -> str:
     """根据用户字体/字号生成 QSS，避免固定字号覆盖设置。"""
-    family = str(font_family or "Microsoft YaHei UI").replace('"', "")
     base = max(9, min(22, int(font_size)))
     values = {
-        "__FONT_FAMILY__": family,
+        "__FONT_STACK__": font_stack(font_family),
         "__FS_BASE__": str(base),
         "__FS_TITLE__": str(base + 9),
         "__FS_SECTION__": str(base + 2),
@@ -161,6 +160,48 @@ def build_stylesheet(font_family: str, font_size: int) -> str:
     for key, value in values.items():
         stylesheet = stylesheet.replace(key, value)
     return stylesheet
+
+
+def font_stack(family: str) -> str:
+    """生成 QSS 字体回退链，避免平台默认字体缺失。"""
+    candidates = [
+        str(family or "Microsoft YaHei UI").replace('"', ""),
+        "Microsoft YaHei UI",
+        "PingFang SC",
+        "Noto Sans CJK SC",
+        "DejaVu Sans",
+    ]
+    seen: set[str] = set()
+    parts: List[str] = []
+    for name in candidates:
+        if name and name not in seen:
+            seen.add(name)
+            parts.append(f'"{name}"')
+    parts.append("sans-serif")
+    return ", ".join(parts)
+
+
+def access_notice_keys() -> Dict[str, str]:
+    """按平台选择首次启动网络提示文案。"""
+    if sys.platform == "win32":
+        return {
+            "title": "firewall_title",
+            "intro": "firewall_intro",
+            "step1": "firewall_step1",
+            "step2": "firewall_step2",
+            "step3": "firewall_step3",
+            "warning": "firewall_warning",
+            "ack": "firewall_ack",
+        }
+    return {
+        "title": "network_title",
+        "intro": "network_intro",
+        "step1": "network_step1",
+        "step2": "network_step2",
+        "step3": "network_step3",
+        "warning": "network_warning",
+        "ack": "network_ack",
+    }
 
 
 def make_light_palette() -> QPalette:
@@ -416,13 +457,14 @@ class LightMessageBox(QMessageBox):
 
 
 class FirewallNoticeDialog(QDialog):
-    """首次启动前的防火墙操作引导。"""
+    """首次启动前的网络访问操作引导。"""
 
     def __init__(self, i18n: Translator, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         prepare_light_window(self)
         self.i18n = i18n
-        self.setWindowTitle(i18n.t("firewall_title"))
+        keys = access_notice_keys()
+        self.setWindowTitle(i18n.t(keys["title"]))
         self.setMinimumWidth(500)
         self.setMaximumWidth(640)
 
@@ -430,7 +472,7 @@ class FirewallNoticeDialog(QDialog):
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(14)
 
-        intro = QLabel(i18n.t("firewall_intro"))
+        intro = QLabel(i18n.t(keys["intro"]))
         intro.setWordWrap(True)
         intro.setStyleSheet("font-weight: 600;")
         layout.addWidget(intro)
@@ -438,21 +480,21 @@ class FirewallNoticeDialog(QDialog):
         steps = QLabel(
             "\n\n".join(
                 [
-                    i18n.t("firewall_step1"),
-                    i18n.t("firewall_step2"),
-                    i18n.t("firewall_step3"),
+                    i18n.t(keys["step1"]),
+                    i18n.t(keys["step2"]),
+                    i18n.t(keys["step3"]),
                 ]
             )
         )
         steps.setWordWrap(True)
         layout.addWidget(steps)
 
-        warning = QLabel(i18n.t("firewall_warning"))
+        warning = QLabel(i18n.t(keys["warning"]))
         warning.setWordWrap(True)
         warning.setStyleSheet("color: #b45309;")
         layout.addWidget(warning)
 
-        self.ack_box = QCheckBox(i18n.t("firewall_ack"))
+        self.ack_box = QCheckBox(i18n.t(keys["ack"]))
         layout.addWidget(self.ack_box)
 
         actions = QHBoxLayout()
@@ -547,7 +589,8 @@ class SettingsDialog(QDialog):
         self.lang_label.setText(i18n.t("language"))
         self.preview_label.setText(i18n.t("preview"))
         self.hint_label.setText(i18n.t("settings_hint"))
-        self.reset_btn.setText(i18n.t("reset_firewall_tip"))
+        reset_key = "reset_firewall_tip" if sys.platform == "win32" else "reset_network_tip"
+        self.reset_btn.setText(i18n.t(reset_key))
         for button in self.findChildren(QPushButton):
             if button is self.reset_btn:
                 continue
@@ -870,7 +913,8 @@ class MainWindow(QMainWindow):
     def reset_firewall_notice(self) -> None:
         self.config["firewall_notice_shown"] = False
         self.save_config_now()
-        self.statusBar().showMessage(self.text("status_firewall_reset"), 4000)
+        status_key = "status_firewall_reset" if sys.platform == "win32" else "status_network_reset"
+        self.statusBar().showMessage(self.text(status_key), 4000)
 
     def retranslate_ui(self) -> None:
         self.setWindowTitle(self.text("app_title"))

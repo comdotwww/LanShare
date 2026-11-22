@@ -8,20 +8,30 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 TEMP_ROOT = tempfile.mkdtemp(prefix="lanfileshare-test-")
-os.environ["APPDATA"] = TEMP_ROOT
+os.environ["LANFS_CONFIG_DIR"] = TEMP_ROOT
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from app.config import config_path, load_config  # noqa: E402
+from app.config import config_dir, config_path, load_config  # noqa: E402
+from app import network as network_module  # noqa: E402
 from app.registry import ShareRegistry, UploadRegistry  # noqa: E402
 from app.server import LanHTTPServer, ShareRequestHandler  # noqa: E402
-from app.ui import FirewallNoticeDialog, MainWindow, QRCodeDialog, SettingsDialog  # noqa: E402
+from app.ui import (  # noqa: E402
+    FirewallNoticeDialog,
+    MainWindow,
+    QRCodeDialog,
+    SettingsDialog,
+    access_notice_keys,
+    build_stylesheet,
+    font_stack,
+)
 
 
 def fetch(url: str, method: str = "GET", headers: dict | None = None):
@@ -58,6 +68,52 @@ def expect_status(url: str, status: int, method: str = "GET", headers: dict | No
 
 def main() -> None:
     base = Path(TEMP_ROOT)
+    assert config_dir() == base / "LanFileShare"
+
+    stack = font_stack("Custom Font")
+    assert "Custom Font" in stack and "PingFang SC" in stack and "Noto Sans CJK SC" in stack
+    assert "__FONT_STACK__" not in build_stylesheet("Custom Font", 14)
+    expected_notice = "firewall_title" if sys.platform == "win32" else "network_title"
+    assert access_notice_keys()["title"] == expected_notice
+
+    class Completed:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    original_network_sys = network_module.sys
+    original_run = network_module.subprocess.run
+    try:
+        network_module.sys = SimpleNamespace(platform="linux")
+        network_module.subprocess.run = lambda *a, **k: Completed(
+            json.dumps(
+                [
+                    {
+                        "ifname": "eth0",
+                        "addr_info": [
+                            {"family": "inet", "local": "192.168.1.20"},
+                            {"family": "inet6", "local": "fe80::1"},
+                        ],
+                    }
+                ]
+            )
+        )
+        assert ("eth0", "192.168.1.20") in network_module._linux_entries()
+
+        network_module.sys = SimpleNamespace(platform="darwin")
+
+        def fake_run(command, *args, **kwargs):
+            if command[:3] == ["route", "-n", "get"]:
+                return Completed(" interface: en0\n")
+            if command[:2] == ["ifconfig", "en0"]:
+                return Completed(" inet 192.168.2.20 netmask 0xffffff00\n")
+            return Completed("")
+
+        network_module.subprocess.run = fake_run
+        assert ("en0", "192.168.2.20") in network_module._mac_entries()
+    finally:
+        network_module.sys = original_network_sys
+        network_module.subprocess.run = original_run
+
     shared = base / "shared"
     (shared / "sub").mkdir(parents=True)
     (shared / "hello.txt").write_text("ABCDEFGHIJ", encoding="utf-8")

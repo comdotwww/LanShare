@@ -4,10 +4,22 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
 APP_NAME = "LanFileShare"
+CONFIG_DIR_ENV = "LANFS_CONFIG_DIR"
+
+
+def default_font_family() -> str:
+    """按平台返回默认中文字体，QSS 仍会附加回退字体链。"""
+    if sys.platform == "darwin":
+        return "PingFang SC"
+    if sys.platform.startswith("linux"):
+        return "Noto Sans CJK SC"
+    return "Microsoft YaHei UI"
+
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "bind_ip": "0.0.0.0",
@@ -15,7 +27,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "base_path": "/share",
     "shares": [],
     "uploads": [],
-    "font_family": "Microsoft YaHei UI",
+    "font_family": default_font_family(),
     "font_size": 13,
     "language": "zh",
     "firewall_notice_shown": False,
@@ -23,8 +35,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 
 def config_dir() -> Path:
-    appdata = os.environ.get("APPDATA") or str(Path.home())
-    path = Path(appdata) / APP_NAME
+    """跨平台配置目录；LANFS_CONFIG_DIR 可用于测试或便携模式。"""
+    override = os.environ.get(CONFIG_DIR_ENV)
+    if override:
+        base = Path(override)
+    elif sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or Path.home())
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        base = Path(xdg) if xdg else Path.home() / ".config"
+    path = base / APP_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
